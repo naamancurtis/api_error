@@ -1,0 +1,22 @@
+[package]
+name = "api_error"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[features]
+default = ["anyhow"]
+anyhow = ["dep:anyhow"]
+eyre = ["dep:eyre"]
+
+[dependencies]
+tracing = "0.1.35"
+anyhow = { version = "1.0.58", optional = true }
+eyre = { version = "0.6.8", optional = true }
+
+[dev-dependencies]
+thiserror = "1.0.31"
+serde_json = "1.0.82"
+tracing-subscriber = { version = "^0.3", default-features = false, features = ["registry", "fmt", "env-filter"] }
+tracing_sprout = "0.1.0-alpha.6"
