@@ -15,18 +15,22 @@ Previously various attempts at doing this often resulted in very large enums tha
 as soon as a new requirement came in. This is simply the latest attempt at simplifying this
 
 ```rust
-use thiserror::Error as ThisError;
+use tracing::subscriber::set_global_default;
+use tracing_sprout::TrunkLayer;
+use tracing_subscriber::prelude::*;
+use tracing_subscriber::{EnvFilter, Registry};
+
 use serde_json::{json, Value};
+use thiserror::Error as ThisError;
 
-use std::fmt::{self, Debug};
+use std::fmt;
 
-use api_error::{DetailedError, ToResponse, e};
-
+use api_error::{e, DetailedError, ToResponse};
 
 #[derive(Debug, ThisError)]
 enum PublicError {
     #[error("An unexpected server error occurred, please try again in 5 seconds.")]
-    UnexpectedServerError
+    UnexpectedServerError,
 }
 
 impl ToResponse for PublicError {
@@ -42,14 +46,27 @@ impl ToResponse for PublicError {
     }
 }
 
-type Error = DetailedError<PublicError>;
+#[derive(Debug)]
+enum Category {
+    IBrokeThis,
+}
+
+impl fmt::Display for Category {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{:?}", self)
+    }
+}
+
+type Error = DetailedError<PublicError, Category>;
 
 fn test() -> Result<(), Error> {
     use std::fs::File;
 
-    let f = File::open("random.txt").map_err(|e| {
+    let _f = File::open("random.txt").map_err(|e| {
         e!(
-            e, PublicError::UnexpectedServerError,
+            e,
+            PublicError::UnexpectedServerError,
+            Category::IBrokeThis,
             "failed to read my amazing file"
         )
     })?;
@@ -57,6 +74,16 @@ fn test() -> Result<(), Error> {
 }
 
 fn main() {
+    let env_filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("trace"));
+    let formatting_layer = TrunkLayer::new(
+        "api-error-app".to_string(),
+        env!("CARGO_PKG_VERSION").to_string(),
+        std::io::stdout,
+    );
+    let subscriber = Registry::default().with(env_filter).with(formatting_layer);
+
+    set_global_default(subscriber).expect("failed to set up global tracing subscriber");
+
     let e = test().unwrap_err();
     let json_response = e.to_response();
     assert_eq!(json_response["category"].as_str().unwrap(), "UnexpectedServerError");

@@ -1,3 +1,5 @@
+use std::fmt;
+
 use tracing::subscriber::set_global_default;
 use tracing_sprout::TrunkLayer;
 use tracing_subscriber::prelude::*;
@@ -27,7 +29,18 @@ impl ToResponse for PublicError {
     }
 }
 
-type Error = DetailedError<PublicError>;
+#[derive(Debug)]
+enum Category {
+    IBrokeThis,
+}
+
+impl fmt::Display for Category {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{:?}", self)
+    }
+}
+
+type Error = DetailedError<PublicError, Category>;
 
 fn test() -> Result<(), Error> {
     use std::fs::File;
@@ -36,6 +49,7 @@ fn test() -> Result<(), Error> {
         e!(
             e,
             PublicError::UnexpectedServerError,
+            Category::IBrokeThis,
             "failed to read my amazing file"
         )
     })?;

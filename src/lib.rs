@@ -64,7 +64,18 @@
 //!     }
 //! }
 //!
-//! type Error = DetailedError<PublicError>;
+//! #[derive(Debug)]
+//! enum Category {
+//!     IBrokeThis
+//! }
+//!
+//! impl fmt::Display for Category {
+//!     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+//!         write!(f, "{:?}", self)
+//!     }
+//! }
+//!
+//! type Error = DetailedError<PublicError, Category>;
 //!
 //! fn test() -> Result<(), Error> {
 //!     use std::fs::File;
@@ -72,6 +83,7 @@
 //!     let f = File::open("random.txt").map_err(|e| {
 //!         e!(
 //!             e, PublicError::UnexpectedServerError,
+//!             Category::IBrokeThis,
 //!             "failed to read my amazing file"
 //!         )
 //!     })?;
@@ -107,13 +119,14 @@ use std::error::Error as StdError;
 use std::fmt::{self, Debug, Display};
 use std::ops::Deref;
 
-pub struct DetailedError<Pub>
+pub struct DetailedError<Pub, Cat>
 where
+    Cat: Display,
     Pub: ToResponse + Debug,
 {
     pub private: InnerError,
     pub public: Pub,
-    meta: Meta,
+    meta: Meta<Cat>,
 }
 
 /// This trait indicates how you want to turn your `PublicError` type into a `Response`.
@@ -125,23 +138,26 @@ pub trait ToResponse {
     fn to_response(&self) -> Self::Response;
 }
 
-pub struct Meta {
+pub struct Meta<C> {
     fields: HashMap<String, String>,
     file: String,
     module: String,
     line: u32,
     level: Level,
+    category: C,
     has_logged: bool,
 }
 
-impl<Pub> DetailedError<Pub>
+impl<Pub, Cat> DetailedError<Pub, Cat>
 where
+    Cat: Display,
     Pub: ToResponse + Debug,
 {
     pub fn new<P: StdError + Send + Sync + 'static, C: Display + Send + Sync + 'static>(
         private: P,
         public: Pub,
         context: Option<C>,
+        category: Cat,
         level: Level,
         file: String,
         line: u32,
@@ -151,6 +167,7 @@ where
             private,
             public,
             context,
+            category,
             level,
             file,
             line,
@@ -167,6 +184,7 @@ where
         private: P,
         public: Pub,
         context: Option<C>,
+        category: Cat,
         level: Level,
         file: String,
         line: u32,
@@ -179,6 +197,7 @@ where
             module,
             line,
             level,
+            category,
             has_logged: false,
         };
         #[cfg(feature = "anyhow")]
@@ -231,6 +250,7 @@ where
                 error!(
                     errors = ?errors,
                     public_error = ?self.public,
+                    category = %meta.category,
                     additional_context = ?meta.fields,
                     file = %meta.file, line = %meta.line as i64,
                     module = %meta.module,
@@ -241,6 +261,7 @@ where
                 error!(
                     errors = ?errors,
                     public_error = ?self.public,
+                    category = %meta.category,
                     file = %meta.file, line = %meta.line as i64,
                     module = %meta.module,
                     "{}", error
@@ -250,6 +271,7 @@ where
                 warn!(
                     errors = ?errors,
                     public_error = ?self.public,
+                    category = %meta.category,
                     additional_context = ?meta.fields,
                     file = %meta.file, line = %meta.line as i64,
                     module = %meta.module,
@@ -259,6 +281,7 @@ where
             Level::WARN => {
                 warn!(
                     errors = ?errors,
+                    category = %meta.category,
                     public_error = ?self.public,
                     file = %meta.file, line = %meta.line as i64,
                     module = %meta.module,
@@ -269,6 +292,7 @@ where
                 info!(
                     errors = ?errors,
                     public_error = ?self.public,
+                    category = %meta.category,
                     additional_context = ?meta.fields,
                     file = %meta.file, line = %meta.line as i64,
                     module = %meta.module,
@@ -279,6 +303,7 @@ where
                 info!(
                     errors = ?errors,
                     public_error = ?self.public,
+                    category = %meta.category,
                     file = %meta.file, line = %meta.line as i64,
                     module = %meta.module,
                     "{}", error
@@ -288,6 +313,7 @@ where
                 debug!(
                     errors = ?errors,
                     public_error = ?self.public,
+                    category = %meta.category,
                     additional_context = ?meta.fields,
                     file = %meta.file, line = %meta.line as i64,
                     module = %meta.module,
@@ -298,6 +324,7 @@ where
                 debug!(
                     errors = ?errors,
                     public_error = ?self.public,
+                    category = %meta.category,
                     file = %meta.file, line = %meta.line as i64,
                     module = %meta.module,
                     "{}", error
@@ -307,6 +334,7 @@ where
                 trace!(
                     errors = ?errors,
                     public_error = ?self.public,
+                    category = %meta.category,
                     additional_context = ?meta.fields,
                     file = %meta.file, line = %meta.line as i64,
                     module = %meta.module,
@@ -317,6 +345,7 @@ where
                 trace!(
                     errors = ?errors,
                     public_error = ?self.public,
+                    category = %meta.category,
                     file = %meta.file, line = %meta.line as i64,
                     module = %meta.module,
                     "{}", error
@@ -327,17 +356,19 @@ where
     }
 }
 
-impl<Pub> fmt::Debug for DetailedError<Pub>
+impl<Pub, Cat> fmt::Debug for DetailedError<Pub, Cat>
 where
+    Cat: Display,
     Pub: ToResponse + Debug,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{:?}", self.private)
+        write!(f, "{}", self.meta.category)
     }
 }
 
-impl<Pub> fmt::Display for DetailedError<Pub>
+impl<Pub, Cat> fmt::Display for DetailedError<Pub, Cat>
 where
+    Cat: Display,
     Pub: ToResponse + Debug,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -345,8 +376,9 @@ where
     }
 }
 
-impl<Pub> StdError for DetailedError<Pub>
+impl<Pub, Cat> StdError for DetailedError<Pub, Cat>
 where
+    Cat: Display,
     Pub: ToResponse + Debug,
 {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
@@ -354,8 +386,9 @@ where
     }
 }
 
-impl<P> Deref for DetailedError<P>
+impl<P, Cat> Deref for DetailedError<P, Cat>
 where
+    Cat: Display,
     P: ToResponse + Debug,
 {
     type Target = InnerError;
@@ -370,11 +403,11 @@ where
 /// This is shorthand for `detailed_error!(Level::ERROR, ...)`
 #[macro_export]
 macro_rules! e {
-    ($private:ident, $public:expr) => {
-        $crate::detailed_error!(tracing::Level::ERROR, $private, $public)
+    ($private:ident, $public:expr, $category:expr) => {
+        $crate::detailed_error!(tracing::Level::ERROR, $private, $public, $category)
     };
-    ($private:ident, $public:expr, $ctx:expr) => {
-        $crate::detailed_error!(tracing::Level::ERROR, $private, $public, $ctx)
+    ($private:ident, $public:expr, $category:expr, $ctx:expr) => {
+        $crate::detailed_error!(tracing::Level::ERROR, $private, $public, $category, $ctx)
     };
 }
 
@@ -383,45 +416,48 @@ macro_rules! e {
 /// This is shorthand for `detailed_error!(Level::WARN, ...)`
 #[macro_export]
 macro_rules! w {
-    ($private:ident, $public:expr) => {
-        $crate::detailed_error!(tracing::Level::WARN, $private, $public)
+    ($private:ident, $public:expr, $category:expr) => {
+        $crate::detailed_error!(tracing::Level::WARN, $private, $public, $category)
     };
-    ($private:ident, $public:expr, $ctx:expr) => {
-        $crate::detailed_error!(tracing::Level::WARN, $private, $public, $ctx)
+    ($private:ident, $public:expr, $ctx:expr, $category:expr) => {
+        $crate::detailed_error!(tracing::Level::WARN, $private, $public, $category, $ctx)
     };
 }
 
 /// Create a new error and emit an event with with the provided error level
 #[macro_export]
 macro_rules! detailed_error {
-    ($lvl:path, $private:ident, $public:expr) => {
+    ($lvl:path, $private:ident, $public:expr, $category:expr) => {
         $crate::DetailedError::new(
             $private,
             $public,
             None,
+            $category,
             $lvl,
             std::file!().to_string(),
             std::line!(),
             std::module_path!().to_string(),
         )
     };
-    ($lvl:path, $private:ident, $public:expr, $ctx:expr) => {
+    ($lvl:path, $private:ident, $public:expr, $category:expr, $ctx:expr) => {
         $crate::DetailedError::new(
             $private,
             $public,
             Some($ctx),
+            $category,
             $lvl,
             std::file!().to_string(),
             std::line!(),
             std::module_path!().to_string(),
         )
     };
-    ($lvl:path, $private:ident, $public:expr, $ctx:expr, $($k:expr => $v:expr),* $(,)?) => {{
+    ($lvl:path, $private:ident, $public:expr, $category:expr, $ctx:expr, $($k:expr => $v:expr),* $(,)?) => {{
         let mut map: std::collections::HashMap<String, String> = std::convert::From::from([$(($k.to_string(), $v.to_string()),)*]);
         $crate::DetailedError::new_with_tracing(
             $private,
             $public,
             Some($ctx),
+            $category,
             $lvl,
             std::file!().to_string(),
             std::line!(),
